@@ -195,6 +195,8 @@ echo-tts serve \
 | `--cfg-speaker` | `8.0` | Speaker CFG scale |
 | `--seed` | `0` | RNG seed |
 | `--seq-length` | `640` | Sequence length |
+| `--max-chunk-chars` | `400` | Max chars per text chunk (0 = disable chunking) |
+| `--log-vram` | — | Log GPU VRAM usage at key pipeline stages |
 
 ### API Endpoints
 
