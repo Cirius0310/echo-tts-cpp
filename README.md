@@ -21,7 +21,9 @@ The GGUF model weights and ONNX autoencoder files are too large for git.
 
 ### Pre-converted model files
 
-Download GGUF and ONNX DAC models directly from HuggingFace:
+Download GGUF and ONNX DAC models from HuggingFace:
+
+**[🔗 tmdarkbr/echo-tts-gguf](https://huggingface.co/tmdarkbr/echo-tts-gguf)**
 
 ```bash
 huggingface-cli download tmdarkbr/echo-tts-gguf echo-dit.gguf --local-dir .
