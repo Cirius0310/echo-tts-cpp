@@ -56,6 +56,25 @@ static std::vector<float> tensor_to_float_vector(struct ggml_tensor * t) {
         std::vector<ggml_fp16_t> tmp(n);
         ggml_backend_tensor_get(t, tmp.data(), 0, n * sizeof(ggml_fp16_t));
         ggml_fp16_to_fp32_row(tmp.data(), out.data(), (int64_t)n);
+    } else if (t->type == GGML_TYPE_Q8_0 || t->type == GGML_TYPE_Q4_0) {
+        const ggml_type_traits * traits = ggml_get_type_traits(t->type);
+        if (traits && traits->to_float) {
+            int64_t blck_size = traits->blck_size;
+            size_t nbytes = ggml_nbytes(t);
+            std::vector<uint8_t> raw(nbytes);
+            ggml_backend_tensor_get(t, raw.data(), 0, nbytes);
+
+            const uint8_t * src = raw.data();
+            float * dst = out.data();
+            int64_t n_blocks = (int64_t)n / blck_size;
+            for (int64_t i = 0; i < n_blocks; i++) {
+                traits->to_float(src, dst, blck_size);
+                src += traits->type_size;
+                dst += blck_size;
+            }
+        } else {
+            fprintf(stderr, "[echo_model] ERROR: unsupported CPU weight cache type %d\n", (int)t->type);
+        }
     } else {
         fprintf(stderr, "[echo_model] ERROR: unsupported CPU weight cache type %d\n", (int)t->type);
     }
