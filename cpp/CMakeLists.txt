@@ -22,7 +22,22 @@ FetchContent_Declare(
     GIT_TAG        master
     GIT_SHALLOW    TRUE
 )
-FetchContent_MakeAvailable(ggml)
+
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.18.0
+    GIT_SHALLOW    TRUE
+)
+
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    GIT_SHALLOW    TRUE
+)
+
+FetchContent_MakeAvailable(ggml httplib json)
 
 # ── ONNX Runtime ─────────────────────────────────────────────────────
 if(ECHO_ONNX)
@@ -88,6 +103,7 @@ set(ECHO_SOURCES
     src/echo_audio.cpp
     src/echo_postprocess.cpp
     src/echo_pipeline.cpp
+    src/echo_server.cpp
 )
 
 if(ECHO_ONNX)
@@ -101,7 +117,7 @@ target_include_directories(echo-tts PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern
 )
 
-target_link_libraries(echo-tts PRIVATE ggml)
+target_link_libraries(echo-tts PRIVATE ggml httplib::httplib nlohmann_json::nlohmann_json)
 
 if(ECHO_ONNX)
     target_link_libraries(echo-tts PRIVATE onnxruntime)

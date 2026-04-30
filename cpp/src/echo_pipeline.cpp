@@ -51,8 +51,8 @@ bool EchoPipeline::load(const EchoPipelineConfig & config) {
 // Speaker encoding helper
 // ────────────────────────────────────────────────────────────────────
 
-EchoPipeline::SpeakerData EchoPipeline::encode_speaker(const std::string & wav_path) {
-    SpeakerData data;
+SpeakerLatentData EchoPipeline::encode_speaker(const std::string & wav_path) {
+    SpeakerLatentData data;
     auto & hp = model_.hparams();
     auto & pca = model_.pca_state();
 
@@ -158,7 +158,7 @@ std::vector<float> EchoPipeline::generate(
 
     // ── Encode speaker ──
     printf("[pipeline] Encoding speaker audio...\n");
-    SpeakerData speaker = encode_speaker(speaker_wav_path);
+    SpeakerLatentData speaker = encode_speaker(speaker_wav_path);
     if (speaker.seq_len == 0) {
         // No speaker: use zero latent (unconditional speaker)
         int dummy_len = hp.speaker_patch_size;
@@ -216,6 +216,85 @@ std::vector<float> EchoPipeline::generate(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Generation from pre-encoded speaker latent
+// ────────────────────────────────────────────────────────────────────
+
+std::vector<float> EchoPipeline::generate_from_latent(
+    const std::string & text,
+    const SpeakerLatentData & speaker,
+    const EchoSamplerConfig & sampler_config
+) {
+    auto t_start = std::chrono::high_resolution_clock::now();
+    auto & hp = model_.hparams();
+    auto & pca = model_.pca_state();
+
+    // ── Tokenize ──
+    printf("[pipeline] Tokenizing text...\n");
+    EchoTokenizerResult tok = get_text_input_ids_and_mask(text);
+    printf("[pipeline] Text: \"%s\" → %d tokens\n",
+           tok.normalized_text.c_str(), tok.actual_length);
+
+    // Convert mask to float
+    std::vector<float> text_mask_f(tok.mask.size());
+    for (size_t i = 0; i < tok.mask.size(); i++) {
+        text_mask_f[i] = tok.mask[i] ? 1.0f : 0.0f;
+    }
+
+    // ── Validate speaker ──
+    SpeakerLatentData spk = speaker;
+    if (spk.seq_len == 0) {
+        int dummy_len = hp.speaker_patch_size;
+        spk.latent.resize(dummy_len * hp.latent_size, 0.0f);
+        spk.mask.resize(dummy_len, 0.0f);
+        spk.seq_len = dummy_len;
+    }
+
+    // ── Sample ──
+    printf("[pipeline] Sampling...\n");
+    EchoSamplerResult sampled = sample_euler_cfg(
+        model_, sampler_config,
+        spk.latent.data(), spk.mask.data(), spk.seq_len,
+        tok.token_ids.data(), text_mask_f.data(), (int)tok.token_ids.size()
+    );
+
+    // ── Decode ──
+    printf("[pipeline] Decoding latent → audio...\n");
+    std::vector<float> output_audio;
+
+#ifdef ECHO_HAS_ONNX
+    if (dac_.is_loaded()) {
+        EchoPCAParams pca_params = {
+            pca.components.data(), pca.mean.data(), pca.latent_scale,
+            hp.latent_size, 1024
+        };
+        std::vector<float> z_q(sampled.seq_len * 1024);
+        pca_decode(pca_params, sampled.latent.data(), z_q.data(), 1, sampled.seq_len);
+
+        int out_audio_len = 0;
+        output_audio = dac_.decode(z_q.data(), 1, sampled.seq_len, out_audio_len);
+
+        int crop_len = crop_length_from_latent(
+            sampled.latent.data(), sampled.seq_len, hp.latent_size
+        );
+        if (crop_len > 0 && crop_len < out_audio_len) {
+            output_audio.resize(crop_len);
+        }
+
+        printf("[pipeline] Output: %zu samples (%.1f sec)\n",
+               output_audio.size(), output_audio.size() / 44100.0f);
+    }
+#else
+    fprintf(stderr, "[pipeline] WARNING: No DAC decoder. Returning raw latent.\n");
+#endif
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+    float elapsed = std::chrono::duration<float>(t_end - t_start).count();
+    printf("[pipeline] Total generation time: %.1f seconds\n", elapsed);
+
+    return output_audio;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Blockwise generation
 // ────────────────────────────────────────────────────────────────────
 
@@ -237,7 +316,7 @@ std::vector<float> EchoPipeline::generate_blockwise(
     }
 
     // Encode speaker
-    SpeakerData speaker = encode_speaker(speaker_wav_path);
+    SpeakerLatentData speaker = encode_speaker(speaker_wav_path);
     if (speaker.seq_len == 0) {
         int dummy_len = hp.speaker_patch_size;
         speaker.latent.resize(dummy_len * hp.latent_size, 0.0f);
@@ -248,7 +327,7 @@ std::vector<float> EchoPipeline::generate_blockwise(
     // Encode continuation (if provided)
     const float * cont_latent = nullptr;
     int cont_len = 0;
-    SpeakerData continuation;
+    SpeakerLatentData continuation;
     if (!continuation_wav_path.empty()) {
         printf("[pipeline] Encoding continuation audio...\n");
         continuation = encode_speaker(continuation_wav_path);

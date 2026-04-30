@@ -2,9 +2,11 @@
 //
 // Usage:
 //   echo-tts --model echo-dit.gguf --speaker audio.wav --text "Hello world" [options]
+//   echo-tts serve --model echo-dit.gguf --port 8080 --voice alloy=alloy.wav [...]
 
 #include "echo_pipeline.h"
 #include "echo_audio.h"
+#include "echo_server.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -61,14 +63,35 @@ static std::vector<int> parse_int_list(const char * str) {
     return result;
 }
 
+// Collect all values for a repeated flag (e.g. --voice alloy=alloy.wav --voice echo=echo.wav)
+static std::vector<const char *> get_all_args(int argc, char ** argv, const char * flag) {
+    std::vector<const char *> result;
+    for (int i = 1; i < argc - 1; i++) {
+        if (strcmp(argv[i], flag) == 0) {
+            result.push_back(argv[i + 1]);
+        }
+    }
+    return result;
+}
+
+// Parse a single "name=path" pair from a --voice argument
+static bool parse_voice_pair(const char * arg, std::string & name, std::string & path) {
+    const char * eq = strchr(arg, '=');
+    if (!eq || eq == arg || *(eq + 1) == '\0') return false;
+    name.assign(arg, eq - arg);
+    path.assign(eq + 1);
+    return true;
+}
+
 static void print_usage(const char * prog) {
     printf("Echo-TTS C++ Inference Engine\n\n");
-    printf("Usage: %s [options]\n\n", prog);
-    printf("Required:\n");
+    printf("Usage:\n");
+    printf("  %s [options]                                  (single generation)\n", prog);
+    printf("  %s serve --model MODEL --voice NAME=PATH [...] (HTTP server mode)\n\n", prog);
+    printf("CLI generation options:\n");
     printf("  --model PATH         GGUF model file\n");
     printf("  --speaker PATH       Speaker reference WAV\n");
     printf("  --text \"...\"          Text to synthesize\n\n");
-    printf("Optional:\n");
     printf("  --dac-encoder PATH   DAC encoder ONNX file\n");
     printf("  --dac-decoder PATH   DAC decoder ONNX file\n");
     printf("  --output PATH        Output WAV path (default: output.wav)\n");
@@ -89,6 +112,75 @@ static void print_usage(const char * prog) {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Serve subcommand
+// ────────────────────────────────────────────────────────────────────
+
+static int cmd_serve(int argc, char ** argv) {
+    const char * model_path       = get_arg(argc, argv, "--model");
+    const char * dac_encoder_path = get_arg(argc, argv, "--dac-encoder", "");
+    const char * dac_decoder_path = get_arg(argc, argv, "--dac-decoder", "");
+    const char * host             = get_arg(argc, argv, "--host", "0.0.0.0");
+    int port                      = get_int(argc, argv, "--port", 8080);
+
+    if (!model_path) {
+        fprintf(stderr, "ERROR: --model is required for serve mode\n");
+        return 1;
+    }
+    if (!dac_encoder_path || !dac_encoder_path[0]) {
+        fprintf(stderr, "ERROR: --dac-encoder is required for serve mode\n");
+        return 1;
+    }
+    if (!dac_decoder_path || !dac_decoder_path[0]) {
+        fprintf(stderr, "ERROR: --dac-decoder is required for serve mode\n");
+        return 1;
+    }
+
+    // Parse --voice name=path pairs
+    std::vector<const char *> voice_args = get_all_args(argc, argv, "--voice");
+    if (voice_args.empty()) {
+        fprintf(stderr, "ERROR: At least one --voice name=path is required for serve mode\n");
+        return 1;
+    }
+
+    std::unordered_map<std::string, std::string> voices;
+    for (const char * va : voice_args) {
+        std::string name, path;
+        if (!parse_voice_pair(va, name, path)) {
+            fprintf(stderr, "ERROR: Invalid --voice format '%s'. Use: --voice name=path\n", va);
+            return 1;
+        }
+        voices[name] = path;
+    }
+
+    // Build server config
+    EchoServerConfig server_config;
+    server_config.host             = host;
+    server_config.port             = port;
+    server_config.model_path       = model_path;
+    server_config.dac_encoder_path = dac_encoder_path;
+    server_config.dac_decoder_path = dac_decoder_path;
+    server_config.voices           = voices;
+
+    // Sampler defaults
+    server_config.sampler_defaults.num_steps         = get_int(argc, argv, "--steps", 40);
+    server_config.sampler_defaults.cfg_scale_text    = get_float(argc, argv, "--cfg-text", 3.0f);
+    server_config.sampler_defaults.cfg_scale_speaker = get_float(argc, argv, "--cfg-speaker", 8.0f);
+    server_config.sampler_defaults.cfg_min_t         = get_float(argc, argv, "--cfg-min-t", 0.5f);
+    server_config.sampler_defaults.cfg_max_t         = get_float(argc, argv, "--cfg-max-t", 1.0f);
+    server_config.sampler_defaults.rng_seed          = (uint64_t)get_int(argc, argv, "--seed", 0);
+    server_config.sampler_defaults.sequence_length   = get_int(argc, argv, "--seq-length", 640);
+
+    // Start server (blocks until shutdown)
+    EchoServer server;
+    if (!server.start(server_config)) {
+        fprintf(stderr, "ERROR: Server failed to start\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Main
 // ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +189,13 @@ int main(int argc, char ** argv) {
         print_usage(argv[0]);
         return 0;
     }
+
+    // Route to serve subcommand
+    if (strcmp(argv[1], "serve") == 0) {
+        return cmd_serve(argc, argv);
+    }
+
+    // ── CLI Generation Mode ──
 
     // Parse arguments
     const char * model_path       = get_arg(argc, argv, "--model");

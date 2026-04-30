@@ -21,6 +21,7 @@ CMakeFiles/
 # ── Model files (download separately) ─────────────────────────
 *.gguf
 onnx_models/
+onnxruntime*/
 *.onnx
 *.onnx.data
 

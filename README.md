@@ -11,8 +11,9 @@ A high-performance C++ inference engine for [Echo-TTS](https://github.com/jordan
 - MSVC 2022 (Windows) or GCC 11+ (Linux)
 - [ONNX Runtime](https://github.com/microsoft/onnxruntime) (GPU package, tested with 1.25.0)
 - [cuDNN 9.x](https://developer.nvidia.com/cudnn) — required at runtime by ONNX Runtime CUDA provider
+- [FFmpeg](https://ffmpeg.org/download.html) — optional, required for MP3 output in server mode
 
-GGML is fetched automatically by CMake via `FetchContent` — no manual setup needed.
+GGML, cpp-httplib, and nlohmann/json are fetched automatically by CMake via `FetchContent` — no manual setup needed.
 
 ## Model Files
 
@@ -118,6 +119,92 @@ echo-tts \
 | `--blockwise` | — | Comma-separated block sizes (e.g. `128,128,64`) |
 | `--continuation` | — | Continuation WAV for blockwise mode |
 | `--dump-intermediates` | — | Dump intermediate tensors for debugging |
+
+## Server Mode
+
+`echo-tts serve` starts an HTTP server with an OpenAI-compatible TTS API. Voices are pre-encoded on startup for low-latency generation.
+
+### Quick Start
+
+```bash
+# Windows
+echo-tts serve ^
+  --model echo-dit.gguf ^
+  --dac-encoder onnx_models/dac_encoder.onnx ^
+  --dac-decoder onnx_models/dac_decoder.onnx ^
+  --voice alloy=kore_gemini.wav ^
+  --voice echo=ana_eleven.wav ^
+  --port 8080
+
+# Linux
+echo-tts serve \
+  --model echo-dit.gguf \
+  --dac-encoder onnx_models/dac_encoder.onnx \
+  --dac-decoder onnx_models/dac_decoder.onnx \
+  --voice alloy=kore_gemini.wav \
+  --voice echo=ana_eleven.wav \
+  --port 8080
+```
+
+### Server CLI Reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--model` | *(required)* | GGUF model file |
+| `--dac-encoder` | *(required)* | DAC encoder ONNX model |
+| `--dac-decoder` | *(required)* | DAC decoder ONNX model |
+| `--voice` | *(required)* | `name=path` pair (repeatable, e.g. `--voice alloy=speaker.wav`) |
+| `--host` | `0.0.0.0` | Listen address |
+| `--port` | `8080` | Listen port |
+| `--steps` | `40` | Euler sampling steps |
+| `--cfg-text` | `3.0` | Text CFG scale |
+| `--cfg-speaker` | `8.0` | Speaker CFG scale |
+| `--seed` | `0` | RNG seed |
+| `--seq-length` | `640` | Sequence length |
+
+### API Endpoints
+
+**`POST /v1/audio/speech`** — OpenAI-compatible TTS
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | — | Model name (e.g. `"echo-tts"`, `"tts-1"`, `"tts-1-hd"`) |
+| `input` | string | *(required)* | Text to synthesize (max ~4096 characters) |
+| `voice` | string | *(required)* | Voice name configured at startup |
+| `response_format` | string | `"wav"` | Output format: `wav`, `pcm`, or `mp3` (requires ffmpeg) |
+| `speed` | number | `1.0` | Playback speed (not currently supported) |
+
+```bash
+curl -X POST http://localhost:8080/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"echo-tts","input":"Hello world.","voice":"alloy","response_format":"mp3"}' \
+  -o output.mp3
+```
+
+Error responses follow the OpenAI format:
+```json
+{"error":{"message":"Invalid voice: 'foo'","type":"invalid_request_error","param":"voice","code":"invalid_voice"}}
+```
+
+**`GET /v1/audio/models`** — List available models
+
+```bash
+curl http://localhost:8080/v1/audio/models
+```
+
+**`GET /health`** — Health check with voice list
+
+```bash
+curl http://localhost:8080/health
+```
+
+### SillyTavern Configuration
+
+Set the TTS provider to **OpenAI** and configure:
+
+- **Provider Endpoint:** `http://localhost:8080/v1`
+- **Model:** `echo-tts`
+- **Voice:** Pick any voice name from your `--voice` flags
 
 ## Architecture
 

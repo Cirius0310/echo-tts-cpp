@@ -29,6 +29,16 @@ struct EchoPipelineConfig {
 };
 
 // ────────────────────────────────────────────────────────────────────
+// Pre-encoded speaker data (PCA latent + mask)
+// ────────────────────────────────────────────────────────────────────
+
+struct SpeakerLatentData {
+    std::vector<float> latent;    // (seq_len, 80)
+    std::vector<float> mask;      // (seq_len,)
+    int seq_len = 0;
+};
+
+// ────────────────────────────────────────────────────────────────────
 // Pipeline Class
 // ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +55,14 @@ public:
     std::vector<float> generate(
         const std::string & text,
         const std::string & speaker_wav_path,
+        const EchoSamplerConfig & sampler_config
+    );
+
+    // Generation from a pre-encoded speaker latent (skips DAC+PCA encoding).
+    // speaker: pre-computed SpeakerLatentData from encode_speaker().
+    std::vector<float> generate_from_latent(
+        const std::string & text,
+        const SpeakerLatentData & speaker,
         const EchoSamplerConfig & sampler_config
     );
 
@@ -66,6 +84,9 @@ public:
         const EchoSamplerConfig & config
     );
 
+    // Encode speaker audio to PCA latent + mask (for pre-caching in server mode).
+    SpeakerLatentData encode_speaker(const std::string & wav_path);
+
     // Access internals
     EchoModel & model() { return model_; }
     const EchoModel & model() const { return model_; }
@@ -75,12 +96,4 @@ private:
 #ifdef ECHO_HAS_ONNX
     EchoDACSession dac_;
 #endif
-
-    // Helper: encode speaker audio to PCA latent + mask
-    struct SpeakerData {
-        std::vector<float> latent;    // (seq_len, 80)
-        std::vector<float> mask;      // (seq_len,)
-        int seq_len = 0;
-    };
-    SpeakerData encode_speaker(const std::string & wav_path);
 };
