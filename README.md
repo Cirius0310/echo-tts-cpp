@@ -68,7 +68,21 @@ cmake --build . --config Release --parallel
 
 ONNX Runtime is optional — if omitted, the DAC autoencoder is skipped (useful for diagnostic dumps only).
 
-**Runtime DLLs:** The build copies ONNX Runtime and GGML DLLs next to the executable automatically. You still need `cudnn64_9.dll` (from [cuDNN 9.x](https://developer.nvidia.com/cudnn)) placed in the same directory or on `PATH`.
+**Runtime DLLs:** The build copies ONNX Runtime and GGML DLLs next to the executable automatically. You still need these libraries accessible (in `PATH` or next to the exe):
+
+- **[cuDNN 9.x](https://developer.nvidia.com/cudnn)** — `cudnn64_9.dll` plus engine DLLs
+- **CUDA 12.x runtime** — `cublas64_12.dll`, `cublasLt64_12.dll`, etc. (ONNX Runtime 1.25.0 is built against CUDA 12)
+
+If your system has CUDA 12.x already (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin`), add both to `PATH`:
+
+```powershell
+[Environment]::SetEnvironmentVariable("PATH",
+    $env:PATH + ";C:\Program Files\NVIDIA\CUDNN\v9.21\bin\12.9\x64" +
+    ";C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin",
+    "User")
+```
+
+Alternatively, copy the needed `.dll` files directly next to `echo-tts.exe`.
 
 ## Usage
 
