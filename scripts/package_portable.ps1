@@ -80,66 +80,94 @@ Write-Host "Step 2: Locating CUDA toolkit DLLs..." -ForegroundColor Yellow
 
 function Find-CudaBin {
     param([int]$Major)
-    # Check CUDA_PATH environment variable
     if ($env:CUDA_PATH) {
-        $cand = if ($Major) { $env:CUDA_PATH -replace '\\$' } else { $env:CUDA_PATH -replace '\\$' }
-        if (Test-Path (Join-Path $cand "bin\cublas64_$Major.dll")) { return Join-Path $cand "bin" }
+        $cand = $env:CUDA_PATH -replace '\\$'
         if (Test-Path (Join-Path $cand "bin\x64\cublas64_$Major.dll")) { return Join-Path $cand "bin\x64" }
+        if (Test-Path (Join-Path $cand "bin\cublas64_$Major.dll")) { return Join-Path $cand "bin" }
     }
     $base = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
     if (Test-Path $base) {
         $dirs = Get-ChildItem $base -Directory | Sort-Object Name -Descending
         foreach ($d in $dirs) {
-            $bindir = Join-Path $d.FullName "bin"
-            $bindir_x64 = Join-Path $d.FullName "bin\x64"
-            if ($Major) {
-                if (Test-Path (Join-Path $bindir_x64 "cublas64_$Major.dll")) { return $bindir_x64 }
+            foreach ($sub in @("bin\x64", "bin")) {
+                $bindir = Join-Path $d.FullName $sub
                 if (Test-Path (Join-Path $bindir "cublas64_$Major.dll")) { return $bindir }
-            } else {
-                if (Test-Path (Join-Path $bindir_x64 "cublas64_*.dll")) { return $bindir_x64 }
-                if (Test-Path (Join-Path $bindir "cublas64_*.dll")) { return $bindir }
             }
         }
     }
     return $null
 }
 
+# Detect which CUDA major versions are required by the bundled libraries
+$requiredCudaVersions = @()
 if ($CudaVersion -gt 0) {
-    $CudaBin = Find-CudaBin -Major $CudaVersion
+    $requiredCudaVersions += $CudaVersion
 } else {
-    # Auto-detect: prefer 12, fall back to 13
-    $CudaBin = Find-CudaBin -Major 12
-    if (-not $CudaBin) { $CudaBin = Find-CudaBin -Major 13; $CudaVersion = 13 }
-    else { $CudaVersion = 12 }
+    # Auto-detect from ONNX Runtime provider DLL (present in build dir after cmake copies it)
+    $onnxProviderPath = Join-Path $BuildDir "onnxruntime_providers_cuda.dll"
+    if (Test-Path $onnxProviderPath) {
+        $bytes = [System.IO.File]::ReadAllBytes($onnxProviderPath)
+        $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+        for ($v = 14; $v -ge 10; $v--) {
+            if ($text -match "cublas64_$v\.") {
+                Write-Host "  ONNX Runtime needs CUDA $v.x" -ForegroundColor Gray
+                $requiredCudaVersions += $v
+                break
+            }
+        }
+    }
+    # Also detect from ggml-cuda.dll
+    $ggmlCudaPath = Join-Path $BuildDir "ggml-cuda.dll"
+    if (Test-Path $ggmlCudaPath) {
+        $bytes = [System.IO.File]::ReadAllBytes($ggmlCudaPath)
+        $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+        for ($v = 14; $v -ge 10; $v--) {
+            if ($text -match "cublas64_$v\.") {
+                Write-Host "  ggml-cuda needs CUDA $v.x" -ForegroundColor Gray
+                if ($requiredCudaVersions -notcontains $v) { $requiredCudaVersions += $v }
+                break
+            }
+        }
+    }
+    # Fallback
+    if ($requiredCudaVersions.Count -eq 0) { $requiredCudaVersions += 12 }
 }
 
-if (-not $CudaBin) {
-    Write-Error "CUDA toolkit not found. Install CUDA 12.x or set with -CudaVersion"
-    exit 1
-}
+$requiredCudaVersions = $requiredCudaVersions | Sort-Object -Unique
+Write-Host "  Required CUDA version(s): $($requiredCudaVersions -join ', ')" -ForegroundColor Green
 
-Write-Host "  Using CUDA $CudaVersion.x from: $CudaBin" -ForegroundColor Green
+$cudaCopied = 0
+foreach ($cv in $requiredCudaVersions) {
+    $CudaBin = Find-CudaBin -Major $cv
+    if (-not $CudaBin) {
+        Write-Error "CUDA $cv.x toolkit not found. Install it or set with -CudaVersion"
+        exit 1
+    }
+    Write-Host "  CUDA $cv.x from: $CudaBin" -ForegroundColor Green
 
-$cudaDlls = @("cublas64_$CudaVersion.dll", "cublasLt64_$CudaVersion.dll", "cufft64_$CudaVersion.dll")
-$cudaMissing = @()
-foreach ($dll in $cudaDlls) {
-    $src = Join-Path $CudaBin $dll
-    if (Test-Path $src) {
-        Copy-Item $src $StagingDir
-        Write-Host "  + $dll"
-    } else {
-        $cudaMissing += $dll
+    $cudaDlls = @("cudart64_$cv.dll", "cublas64_$cv.dll", "cublasLt64_$cv.dll")
+    foreach ($dll in $cudaDlls) {
+        $src = Join-Path $CudaBin $dll
+        if (Test-Path $src) {
+            if (-not (Test-Path (Join-Path $StagingDir $dll))) {
+                Copy-Item $src $StagingDir
+                Write-Host "  + $dll"
+                $cudaCopied++
+            }
+        } else {
+            Write-Warning "  Could not find: $dll"
+        }
+    }
+
+    $cufftPat = "cufft64_*.dll"
+    $cufftDll = Get-ChildItem $CudaBin -Filter $cufftPat | Select-Object -First 1
+    if ($cufftDll -and -not (Test-Path (Join-Path $StagingDir $cufftDll.Name))) {
+        Copy-Item $cufftDll.FullName $StagingDir
+        Write-Host "  + $($cufftDll.Name)"
+        $cudaCopied++
     }
 }
-if ($cudaMissing.Count -gt 0) {
-    Write-Warning "  Could not find: $($cudaMissing -join ', ')"
-}
-
-$cufftDll = Get-ChildItem $CudaBin -Filter "cufft64_*.dll" | Select-Object -First 1
-if ($cufftDll) {
-    Copy-Item $cufftDll.FullName $StagingDir
-    Write-Host "  + $($cufftDll.Name)"
-}
+Write-Host "  → Copied $cudaCopied CUDA DLLs" -ForegroundColor Green
 
 # -- Step 3: Auto-discover cuDNN --
 Write-Host ""
@@ -177,7 +205,14 @@ function Find-CudnnBin {
     return $null
 }
 
-$CudnnBin = Find-CudnnBin -CudaMajor $CudaVersion
+$CudnnBin = $null
+foreach ($cv in $requiredCudaVersions) {
+    $CudnnBin = Find-CudnnBin -CudaMajor $cv
+    if ($CudnnBin) { break }
+}
+if (-not $CudnnBin -and $requiredCudaVersions.Count -gt 0) {
+    $CudnnBin = Find-CudnnBin -CudaMajor 0  # any version
+}
 if ($CudnnBin) {
     Write-Host "  Found: $CudnnBin" -ForegroundColor Green
     $cudnnCopied = 0
