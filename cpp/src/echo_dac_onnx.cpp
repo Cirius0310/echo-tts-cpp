@@ -25,8 +25,9 @@ bool EchoDACSession::load(const std::string & encoder_path, const std::string & 
     try {
         // Try to add CUDA execution provider if available
 #ifdef ECHO_HAS_CUDA
-        OrtCUDAProviderOptions cuda_opts;
+        OrtCUDAProviderOptions cuda_opts{};
         cuda_opts.device_id = 0;
+        cuda_opts.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
         session_opts_.AppendExecutionProvider_CUDA(cuda_opts);
 #endif
 
@@ -138,6 +139,10 @@ std::vector<float> EchoDACSession::decode(
     size_t output_size = batch_size * 1 * out_audio_length;
 
     return std::vector<float>(output_data, output_data + output_size);
+}
+
+void EchoDACSession::release_encoder() {
+    encoder_session_.reset();
 }
 
 #endif // ECHO_HAS_ONNX

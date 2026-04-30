@@ -108,9 +108,11 @@ static void print_usage(const char * prog) {
     printf("  --blockwise N,N,...  Blockwise mode with block sizes\n");
     printf("  --continuation PATH  Continuation audio for blockwise\n");
     printf("  --dump-intermediates DIR  Dump intermediate tensors for debugging\n");
+    printf("  --log-vram               Log GPU VRAM usage at key pipeline stages\n");
     printf("\n");
     printf("Server options (with 'serve' subcommand):\n");
     printf("  --max-chunk-chars N   Max chars per text chunk (default: 400, 0=disable)\n");
+    printf("  --log-vram            Log GPU VRAM usage at key pipeline stages\n");
     printf("  --port N              HTTP port (default: 8080)\n");
     printf("  --host IP             Listen address (default: 0.0.0.0)\n");
     printf("  --voice NAME=PATH     Register a voice (repeatable)\n");
@@ -176,6 +178,7 @@ static int cmd_serve(int argc, char ** argv) {
     server_config.sampler_defaults.rng_seed          = (uint64_t)get_int(argc, argv, "--seed", 0);
     server_config.sampler_defaults.sequence_length   = get_int(argc, argv, "--seq-length", 640);
     server_config.max_chunk_chars                     = get_int(argc, argv, "--max-chunk-chars", 400);
+    server_config.log_vram                            = has_flag(argc, argv, "--log-vram");
 
     // Start server (blocks until shutdown)
     EchoServer server;
@@ -214,6 +217,7 @@ int main(int argc, char ** argv) {
     const char * blockwise_str    = get_arg(argc, argv, "--blockwise");
     const char * continuation_path = get_arg(argc, argv, "--continuation", "");
     const char * dump_dir          = get_arg(argc, argv, "--dump-intermediates");
+    bool log_vram                  = has_flag(argc, argv, "--log-vram");
 
     // Validate required args
     if (!model_path) {
@@ -271,6 +275,10 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    if (log_vram) {
+        EchoModel::log_vram("cli-after-model-load");
+    }
+
     // Diagnostic dump mode
     if (dump_dir) {
         printf("═══ Diagnostic Dump Mode ═══\n");
@@ -287,6 +295,10 @@ int main(int argc, char ** argv) {
     // Generate
     std::vector<float> audio;
     auto t_start = std::chrono::high_resolution_clock::now();
+
+    if (log_vram) {
+        EchoModel::log_vram("cli-before-generation");
+    }
 
     if (blockwise_str) {
         // Blockwise mode
@@ -314,6 +326,10 @@ int main(int argc, char ** argv) {
 
     auto t_end = std::chrono::high_resolution_clock::now();
     float elapsed = std::chrono::duration<float>(t_end - t_start).count();
+
+    if (log_vram) {
+        EchoModel::log_vram("cli-after-generation");
+    }
 
     // Save output
     if (!audio.empty()) {

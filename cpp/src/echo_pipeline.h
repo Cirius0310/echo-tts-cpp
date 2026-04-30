@@ -100,6 +100,12 @@ public:
         const EchoKVCache & kv_speaker
     );
 
+    // Release scheduler memory pool (for server mode between requests)
+    void release_scheduler_memory();
+
+    // Release DAC encoder session to free ORT CUDA memory after voice pre-encoding
+    void release_dac_encoder();
+
     // Access internals
     EchoModel & model() { return model_; }
     const EchoModel & model() const { return model_; }

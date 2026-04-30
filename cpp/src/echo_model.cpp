@@ -16,6 +16,10 @@
 #include <limits>
 #include <cstdlib>
 
+#ifdef ECHO_HAS_CUDA
+#include <cuda_runtime.h>
+#endif
+
 static void print_tensor_stats(const char * name, struct ggml_tensor * t) {
     size_t n = ggml_nelements(t);
     if (n == 0) {
@@ -161,6 +165,32 @@ EchoModel::~EchoModel() {
     if (gguf_ctx_)    { gguf_free(gguf_ctx_); gguf_ctx_ = nullptr; }
     if (backend_)     { ggml_backend_free(backend_); backend_ = nullptr; }
     if (cpu_backend_) { ggml_backend_free(cpu_backend_); cpu_backend_ = nullptr; }
+}
+
+void EchoModel::reset_scheduler() {
+    if (sched_) {
+        ggml_backend_synchronize(backend_);
+        ggml_backend_sched_free(sched_);
+    }
+    ggml_backend_t backends[] = { backend_, cpu_backend_ };
+    sched_ = ggml_backend_sched_new(backends, nullptr, 2, 8192, false, true);
+}
+
+void EchoModel::log_vram(const char * stage) {
+#ifdef ECHO_HAS_CUDA
+    size_t free_bytes = 0, total_bytes = 0;
+    cudaError_t err = cudaMemGetInfo(&free_bytes, &total_bytes);
+    if (err == cudaSuccess) {
+        size_t used = total_bytes - free_bytes;
+        fprintf(stderr, "[vram] %-32s used=%6.1f GB  free=%6.1f GB  total=%6.1f GB\n",
+                stage,
+                used  / (1024.0 * 1024.0 * 1024.0),
+                free_bytes / (1024.0 * 1024.0 * 1024.0),
+                total_bytes / (1024.0 * 1024.0 * 1024.0));
+    }
+#else
+    (void)stage;
+#endif
 }
 
 // ────────────────────────────────────────────────────────────────────

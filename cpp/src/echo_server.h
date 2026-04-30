@@ -32,6 +32,9 @@ struct EchoServerConfig {
 
     // Max characters per text chunk for multi-chunk generation (0 = disable chunking)
     int max_chunk_chars = 400;
+
+    // Log VRAM usage at key pipeline stages
+    bool log_vram = false;
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -83,4 +86,5 @@ private:
 
     bool ffmpeg_available_ = false;
     int max_chunk_chars_ = 400;
+    bool log_vram_ = false;
 };

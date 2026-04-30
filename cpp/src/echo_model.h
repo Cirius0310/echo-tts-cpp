@@ -266,6 +266,12 @@ public:
     const EchoPCAState & pca_state() const { return pca_state_; }
     ggml_backend_t       backend()   const { return backend_; }
 
+    // Release scheduler memory pool to free GPU memory between requests
+    void reset_scheduler();
+
+    // Log current GPU VRAM usage (CUDA only; no-op otherwise)
+    static void log_vram(const char * stage);
+
 private:
     EchoHParams hparams_;
     EchoPCAState pca_state_;

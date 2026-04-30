@@ -47,6 +47,18 @@ bool EchoPipeline::load(const EchoPipelineConfig & config) {
     return true;
 }
 
+void EchoPipeline::release_scheduler_memory() {
+    model_.reset_scheduler();
+}
+
+void EchoPipeline::release_dac_encoder() {
+#ifdef ECHO_HAS_ONNX
+    if (dac_.is_loaded()) {
+        dac_.release_encoder();
+    }
+#endif
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Speaker encoding helper
 // ────────────────────────────────────────────────────────────────────
@@ -67,8 +79,8 @@ SpeakerLatentData EchoPipeline::encode_speaker(const std::string & wav_path) {
            audio.size(), audio.size() / 44100.0f);
 
 #ifdef ECHO_HAS_ONNX
-    if (!dac_.is_loaded()) {
-        fprintf(stderr, "[pipeline] ERROR: DAC not loaded, cannot encode speaker\n");
+    if (!dac_.is_encoder_loaded()) {
+        fprintf(stderr, "[pipeline] ERROR: DAC encoder not loaded, cannot encode speaker\n");
         return data;
     }
 
@@ -166,6 +178,9 @@ std::vector<float> EchoPipeline::generate(
         speaker.mask.resize(dummy_len, 0.0f);
         speaker.seq_len = dummy_len;
     }
+
+    // Encoder no longer needed — free its ORT CUDA arena
+    release_dac_encoder();
 
     // ── Sample ──
     printf("[pipeline] Sampling...\n");
@@ -426,6 +441,9 @@ std::vector<float> EchoPipeline::generate_blockwise(
         cont_latent = continuation.latent.data();
         cont_len = continuation.seq_len;
     }
+
+    // Encoder no longer needed — free its ORT CUDA arena
+    release_dac_encoder();
 
     // Sample blockwise
     EchoSamplerResult sampled = sample_blockwise(

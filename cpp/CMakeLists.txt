@@ -126,6 +126,8 @@ endif()
 
 if(ECHO_CUDA)
     target_compile_definitions(echo-tts PRIVATE ECHO_HAS_CUDA=1)
+    find_package(CUDAToolkit REQUIRED)
+    target_link_libraries(echo-tts PRIVATE CUDA::cudart)
 endif()
 
 # ── Post-build: copy required DLLs beside the executable ──────────────

@@ -404,10 +404,26 @@ bool EchoServer::start(const EchoServerConfig & config) {
         return false;
     }
 
+    if (config.log_vram) {
+        EchoModel::log_vram("server-after-model-load");
+        log_vram_ = true;
+    }
+
     // ── Pre-encode voices ──
     if (!pre_encode_voices(config.voices)) {
         fprintf(stderr, "[server] ERROR: Failed to pre-encode voices\n");
         return false;
+    }
+
+    if (log_vram_) {
+        EchoModel::log_vram("server-after-voices-encoded");
+    }
+
+    // Release ORT encoder session — never needed again after voice pre-encoding
+    pipeline_.release_dac_encoder();
+
+    if (log_vram_) {
+        EchoModel::log_vram("server-after-encoder-released");
     }
 
     // ── Check ffmpeg availability (for MP3 support) ──
@@ -550,6 +566,10 @@ bool EchoServer::start(const EchoServerConfig & config) {
         printf("[server] Generating: voice='%s', text='%s'\n",
                voice_name.c_str(), input_text.c_str());
 
+        if (log_vram_) {
+            EchoModel::log_vram("server-before-generation");
+        }
+
         std::vector<float> audio;
         {
             std::lock_guard<std::mutex> lock(gpu_mutex_);
@@ -561,6 +581,16 @@ bool EchoServer::start(const EchoServerConfig & config) {
             float elapsed = std::chrono::duration<float>(t_end - t_start).count();
             printf("[server] Generated %.1f sec audio in %.1f seconds\n",
                    audio.size() / 44100.0f, elapsed);
+        }
+
+        if (log_vram_) {
+            EchoModel::log_vram("server-after-generation");
+        }
+
+        pipeline_.release_scheduler_memory();
+
+        if (log_vram_) {
+            EchoModel::log_vram("server-after-scheduler-reset");
         }
 
         if (audio.empty()) {

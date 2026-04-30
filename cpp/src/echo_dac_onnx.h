@@ -39,7 +39,11 @@ public:
         int & out_audio_length
     );
 
-    bool is_loaded() const { return encoder_session_ != nullptr && decoder_session_ != nullptr; }
+    bool is_loaded()        const { return decoder_session_ != nullptr; }
+    bool is_encoder_loaded() const { return encoder_session_ != nullptr; }
+
+    // Release the encoder session to free ORT CUDA memory after voice pre-encoding.
+    void release_encoder();
 
 private:
     Ort::Env env_;
