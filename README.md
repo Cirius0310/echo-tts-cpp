@@ -206,6 +206,21 @@ Set the TTS provider to **OpenAI** and configure:
 - **Model:** `echo-tts`
 - **Voice:** Pick any voice name from your `--voice` flags
 
+## Examples
+
+Pre-generated audio samples showcasing different voices and text styles — browse them in the [`examples/`](examples/) directory:
+
+| File | Voice | Duration | Style |
+|------|-------|----------|-------|
+| [`01_echo_welcome.wav`](examples/01_echo_welcome.wav) | echo | 13.6s | Product intro narration |
+| [`02_herta_dialogue.wav`](examples/02_herta_dialogue.wav) | herta | 12.8s | Casual dialogue |
+| [`03_echo_technical.wav`](examples/03_echo_technical.wav) | echo | 20.0s | Technical explanation |
+| [`04_herta_playful.wav`](examples/04_herta_playful.wav) | herta | 13.7s | Playful fourth-wall break |
+| [`05_echo_architecture.wav`](examples/05_echo_architecture.wav) | echo | 29.7s | Architecture deep dive (max capacity) |
+| [`06_kore_wisdom.wav`](examples/06_kore_wisdom.wav) | kore | 15.4s | Formal wisdom-keeper persona |
+
+All generated on an RTX 4080 SUPER — see the [examples README](examples/README.md) for full generation stats and voice descriptions.
+
 ## Architecture
 
 | Component | Backend | Details |
