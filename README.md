@@ -69,6 +69,11 @@ cmake .. -DONNXRUNTIME_ROOT=/path/to/onnxruntime-linux-x64-gpu-1.25.0
 cmake --build . --config Release --parallel
 ```
 
+> **CUDA version:** If you have multiple CUDA versions installed (e.g. CUDA 12 and 13), CMake may detect the wrong one. Explicitly target the CUDA 12 toolkit (matching ONNX Runtime):
+> ```bash
+> cmake .. -DCUDAToolkit_ROOT="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8"
+> ```
+
 ONNX Runtime is optional — if omitted, the DAC autoencoder is skipped (useful for diagnostic dumps only).
 
 **Runtime DLLs:** The build copies ONNX Runtime and GGML DLLs next to the executable automatically. You still need these libraries accessible (in `PATH` or next to the exe):
