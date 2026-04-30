@@ -26,7 +26,13 @@ Download GGUF and ONNX DAC models from HuggingFace:
 **[🔗 tmdarkbr/echo-tts-gguf](https://huggingface.co/tmdarkbr/echo-tts-gguf)**
 
 ```bash
+# F16 (5.6 GB) — best quality
 huggingface-cli download tmdarkbr/echo-tts-gguf echo-dit.gguf --local-dir .
+
+# Q8_0 (3.3 GB) — near-lossless, lower VRAM
+huggingface-cli download tmdarkbr/echo-tts-gguf echo-dit-q8.gguf --local-dir .
+
+# ONNX autoencoder
 huggingface-cli download tmdarkbr/echo-tts-gguf onnx/ --local-dir onnx_models
 ```
 
