@@ -92,6 +92,27 @@ If your system has CUDA 12.x already (e.g. `C:\Program Files\NVIDIA GPU Computin
 
 Alternatively, copy the needed `.dll` files directly next to `echo-tts.exe`.
 
+### Portable Release
+
+Pre-built ZIP archives are available from [GitHub Releases](https://github.com/Cirius0310/echo-tts-cpp/releases). They include everything except model files — just extract and run:
+
+- `echo-tts.exe` — the TTS engine
+- All GPU runtime DLLs (CUDA 12.8, cuDNN 9.21, ONNX Runtime 1.25.0)
+- OpenSSL 3, VC++ 2022 redistributables
+- ffmpeg portable (for MP3 output)
+
+**To create your own portable package** from source:
+
+```bash
+cmake --build cpp/build --config Release --target package_portable
+```
+
+Or run the script directly:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/package_portable.ps1
+```
+
 ## Usage
 
 ```bash

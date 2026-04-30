@@ -164,3 +164,14 @@ endif()
 
 # ── Install ──────────────────────────────────────────────────────────
 install(TARGETS echo-tts RUNTIME DESTINATION bin)
+
+# ── Portable packaging ────────────────────────────────────────────────
+add_custom_target(package_portable
+    COMMAND powershell -ExecutionPolicy Bypass -File
+        "${CMAKE_SOURCE_DIR}/../scripts/package_portable.ps1"
+        -BuildDir "$<TARGET_FILE_DIR:echo-tts>"
+        -CudaVersion 12
+        -WithFfmpeg:$<IF:$<BOOL:${ECHO_CUDA}>,true,false>
+    COMMENT "Creating portable release ZIP..."
+    DEPENDS echo-tts
+)
