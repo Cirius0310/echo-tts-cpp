@@ -202,7 +202,7 @@ curl http://localhost:8080/health
 
 Set the TTS provider to **OpenAI** and configure:
 
-- **Provider Endpoint:** `http://localhost:8080/v1`
+- **Provider Endpoint:** `http://127.0.0.1:8080/v1/audio/speech`
 - **Model:** `echo-tts`
 - **Voice:** Pick any voice name from your `--voice` flags
 
