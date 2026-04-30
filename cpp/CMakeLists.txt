@@ -112,5 +112,39 @@ if(ECHO_CUDA)
     target_compile_definitions(echo-tts PRIVATE ECHO_HAS_CUDA=1)
 endif()
 
+# ── Post-build: copy required DLLs beside the executable ──────────────
+if(WIN32)
+    # ONNX Runtime DLLs
+    if(ECHO_ONNX AND ONNXRUNTIME_ROOT)
+        file(GLOB ORT_DLLS "${ONNXRUNTIME_ROOT}/lib/*.dll")
+        foreach(ORT_DLL ${ORT_DLLS})
+            add_custom_command(TARGET echo-tts POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${ORT_DLL}"
+                    "$<TARGET_FILE_DIR:echo-tts>"
+                COMMENT "Copying ONNX Runtime DLL: ${ORT_DLL}"
+            )
+        endforeach()
+    endif()
+
+    # GGML DLLs (built by FetchContent into bin/<config>)
+    add_custom_command(TARGET echo-tts POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/ggml.dll"
+            "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/ggml-base.dll"
+            "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/ggml-cpu.dll"
+            "$<TARGET_FILE_DIR:echo-tts>"
+        COMMENT "Copying GGML DLLs"
+    )
+    if(ECHO_CUDA)
+        add_custom_command(TARGET echo-tts POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/ggml-cuda.dll"
+                "$<TARGET_FILE_DIR:echo-tts>"
+            COMMENT "Copying GGML CUDA DLL"
+        )
+    endif()
+endif()
+
 # ── Install ──────────────────────────────────────────────────────────
 install(TARGETS echo-tts RUNTIME DESTINATION bin)

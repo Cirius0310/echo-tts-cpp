@@ -9,7 +9,7 @@ A high-performance C++ inference engine for [Echo-TTS](https://github.com/jordan
 - NVIDIA GPU with CUDA ≥12.x (tested on RTX 4080)
 - CMake ≥3.18
 - MSVC 2022 (Windows) or GCC 11+ (Linux)
-- [ONNX Runtime](https://github.com/microsoft/onnxruntime) (GPU package, ≥1.19)
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) (GPU package, tested with 1.25.0)
 - [cuDNN 9.x](https://developer.nvidia.com/cudnn) — required at runtime by ONNX Runtime CUDA provider
 
 GGML is fetched automatically by CMake via `FetchContent` — no manual setup needed.
@@ -58,15 +58,17 @@ cd cpp
 mkdir build && cd build
 
 # Windows (MSVC)
-cmake .. -G "Visual Studio 17 2022" -DONNXRUNTIME_ROOT=C:/path/to/onnxruntime-win-x64-gpu-1.19.0
+cmake .. -G "Visual Studio 17 2022" -DONNXRUNTIME_ROOT=C:/path/to/onnxruntime-win-x64-gpu-1.25.0
 cmake --build . --config Release --parallel
 
 # Linux
-cmake .. -DONNXRUNTIME_ROOT=/path/to/onnxruntime-linux-x64-gpu-1.19.0
+cmake .. -DONNXRUNTIME_ROOT=/path/to/onnxruntime-linux-x64-gpu-1.25.0
 cmake --build . --config Release --parallel
 ```
 
 ONNX Runtime is optional — if omitted, the DAC autoencoder is skipped (useful for diagnostic dumps only).
+
+**Runtime DLLs:** The build copies ONNX Runtime and GGML DLLs next to the executable automatically. You still need `cudnn64_9.dll` (from [cuDNN 9.x](https://developer.nvidia.com/cudnn)) placed in the same directory or on `PATH`.
 
 ## Usage
 
