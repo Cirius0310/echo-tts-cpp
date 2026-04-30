@@ -69,6 +69,20 @@ EchoSamplerResult sample_euler_cfg(
     int text_seq_len
 );
 
+// Standard Euler sampling with pre-computed speaker KV cache.
+// kv_speaker: pre-computed speaker KV cache (shared across text chunks).
+// speaker_mask, speaker_seq_len: still needed for unconditional CFG pass.
+EchoSamplerResult sample_euler_cfg_with_speaker_kv(
+    EchoModel & model,
+    const EchoSamplerConfig & config,
+    const float * speaker_mask,
+    int speaker_seq_len,
+    const int32_t * text_ids,
+    const float * text_mask,
+    int text_seq_len,
+    const EchoKVCache & kv_speaker
+);
+
 // Blockwise Euler sampling with continuation support.
 // continuation_latent: (1, cont_len, 80) — optional prefix latent (nullptr if none)
 EchoSamplerResult sample_blockwise(

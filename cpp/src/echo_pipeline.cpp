@@ -295,6 +295,98 @@ std::vector<float> EchoPipeline::generate_from_latent(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Speaker KV cache pre-computation (for reuse across chunks)
+// ────────────────────────────────────────────────────────────────────
+
+EchoKVCache EchoPipeline::compute_speaker_kv(const SpeakerLatentData & speaker) {
+    auto & hp = model_.hparams();
+    SpeakerLatentData spk = speaker;
+    if (spk.seq_len == 0) {
+        int dummy_len = hp.speaker_patch_size;
+        spk.latent.resize(dummy_len * hp.latent_size, 0.0f);
+        spk.mask.resize(dummy_len, 0.0f);
+        spk.seq_len = dummy_len;
+    }
+    return model_.compute_speaker_kv_cache(spk.latent.data(), spk.seq_len, 1);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Generation from pre-encoded speaker latent with pre-computed speaker KV
+// ────────────────────────────────────────────────────────────────────
+
+std::vector<float> EchoPipeline::generate_from_latent_with_speaker_kv(
+    const std::string & text,
+    const SpeakerLatentData & speaker,
+    const EchoSamplerConfig & sampler_config,
+    const EchoKVCache & kv_speaker
+) {
+    auto t_start = std::chrono::high_resolution_clock::now();
+    auto & hp = model_.hparams();
+    auto & pca = model_.pca_state();
+
+    printf("[pipeline] Tokenizing text...\n");
+    EchoTokenizerResult tok = get_text_input_ids_and_mask(text);
+    printf("[pipeline] Text: \"%s\" → %d tokens\n",
+           tok.normalized_text.c_str(), tok.actual_length);
+
+    std::vector<float> text_mask_f(tok.mask.size());
+    for (size_t i = 0; i < tok.mask.size(); i++) {
+        text_mask_f[i] = tok.mask[i] ? 1.0f : 0.0f;
+    }
+
+    SpeakerLatentData spk = speaker;
+    if (spk.seq_len == 0) {
+        int dummy_len = hp.speaker_patch_size;
+        spk.latent.resize(dummy_len * hp.latent_size, 0.0f);
+        spk.mask.resize(dummy_len, 0.0f);
+        spk.seq_len = dummy_len;
+    }
+
+    printf("[pipeline] Sampling (with pre-computed speaker KV)...\n");
+    EchoSamplerResult sampled = sample_euler_cfg_with_speaker_kv(
+        model_, sampler_config,
+        spk.mask.data(), spk.seq_len,
+        tok.token_ids.data(), text_mask_f.data(), (int)tok.token_ids.size(),
+        kv_speaker
+    );
+
+    printf("[pipeline] Decoding latent → audio...\n");
+    std::vector<float> output_audio;
+
+#ifdef ECHO_HAS_ONNX
+    if (dac_.is_loaded()) {
+        EchoPCAParams pca_params = {
+            pca.components.data(), pca.mean.data(), pca.latent_scale,
+            hp.latent_size, 1024
+        };
+        std::vector<float> z_q(sampled.seq_len * 1024);
+        pca_decode(pca_params, sampled.latent.data(), z_q.data(), 1, sampled.seq_len);
+
+        int out_audio_len = 0;
+        output_audio = dac_.decode(z_q.data(), 1, sampled.seq_len, out_audio_len);
+
+        int crop_len = crop_length_from_latent(
+            sampled.latent.data(), sampled.seq_len, hp.latent_size
+        );
+        if (crop_len > 0 && crop_len < out_audio_len) {
+            output_audio.resize(crop_len);
+        }
+
+        printf("[pipeline] Output: %zu samples (%.1f sec)\n",
+               output_audio.size(), output_audio.size() / 44100.0f);
+    }
+#else
+    fprintf(stderr, "[pipeline] WARNING: No DAC decoder. Returning raw latent.\n");
+#endif
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+    float elapsed = std::chrono::duration<float>(t_end - t_start).count();
+    printf("[pipeline] Total generation time: %.1f seconds\n", elapsed);
+
+    return output_audio;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Blockwise generation
 // ────────────────────────────────────────────────────────────────────
 

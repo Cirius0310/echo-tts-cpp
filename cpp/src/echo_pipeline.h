@@ -87,6 +87,19 @@ public:
     // Encode speaker audio to PCA latent + mask (for pre-caching in server mode).
     SpeakerLatentData encode_speaker(const std::string & wav_path);
 
+    // Pre-compute speaker KV cache for reuse across multiple text chunks.
+    // Returns the KV cache which can be passed to generate_from_latent_with_speaker_kv().
+    EchoKVCache compute_speaker_kv(const SpeakerLatentData & speaker);
+
+    // Generation from pre-encoded speaker latent with pre-computed speaker KV cache.
+    // kv_speaker: pre-computed by compute_speaker_kv(), reused across text chunks.
+    std::vector<float> generate_from_latent_with_speaker_kv(
+        const std::string & text,
+        const SpeakerLatentData & speaker,
+        const EchoSamplerConfig & sampler_config,
+        const EchoKVCache & kv_speaker
+    );
+
     // Access internals
     EchoModel & model() { return model_; }
     const EchoModel & model() const { return model_; }

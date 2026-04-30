@@ -108,6 +108,12 @@ static void print_usage(const char * prog) {
     printf("  --blockwise N,N,...  Blockwise mode with block sizes\n");
     printf("  --continuation PATH  Continuation audio for blockwise\n");
     printf("  --dump-intermediates DIR  Dump intermediate tensors for debugging\n");
+    printf("\n");
+    printf("Server options (with 'serve' subcommand):\n");
+    printf("  --max-chunk-chars N   Max chars per text chunk (default: 400, 0=disable)\n");
+    printf("  --port N              HTTP port (default: 8080)\n");
+    printf("  --host IP             Listen address (default: 0.0.0.0)\n");
+    printf("  --voice NAME=PATH     Register a voice (repeatable)\n");
     printf("  --help               Show this help\n");
 }
 
@@ -169,6 +175,7 @@ static int cmd_serve(int argc, char ** argv) {
     server_config.sampler_defaults.cfg_max_t         = get_float(argc, argv, "--cfg-max-t", 1.0f);
     server_config.sampler_defaults.rng_seed          = (uint64_t)get_int(argc, argv, "--seed", 0);
     server_config.sampler_defaults.sequence_length   = get_int(argc, argv, "--seq-length", 640);
+    server_config.max_chunk_chars                     = get_int(argc, argv, "--max-chunk-chars", 400);
 
     // Start server (blocks until shutdown)
     EchoServer server;

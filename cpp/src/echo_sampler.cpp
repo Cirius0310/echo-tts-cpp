@@ -220,6 +220,131 @@ EchoSamplerResult sample_euler_cfg(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Standard Euler sampling with pre-computed speaker KV cache
+// ────────────────────────────────────────────────────────────────────
+
+EchoSamplerResult sample_euler_cfg_with_speaker_kv(
+    EchoModel & model,
+    const EchoSamplerConfig & config,
+    const float * speaker_mask,
+    int speaker_seq_len,
+    const int32_t * text_ids,
+    const float * text_mask,
+    int text_seq_len,
+    const EchoKVCache & kv_speaker
+) {
+    auto & hp = model.hparams();
+    int seq_len = config.sequence_length;
+    int batch_size = 1;
+    int latent_dim = hp.latent_size;
+    int total_latent = batch_size * seq_len * latent_dim;
+
+    const float INIT_SCALE = 0.999f;
+
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    printf("[sampler] Computing text KV cache...\n");
+
+    EchoKVCache kv_text = model.compute_text_kv_cache(text_ids, text_mask, text_seq_len, batch_size);
+
+    std::vector<float> text_mask_uncond(text_seq_len * batch_size, 0.0f);
+    std::vector<float> speaker_mask_uncond(speaker_seq_len * batch_size, 0.0f);
+
+    std::vector<float> t_schedule(config.num_steps + 1);
+    for (int i = 0; i <= config.num_steps; i++) {
+        t_schedule[i] = (1.0f - (float)i / config.num_steps) * INIT_SCALE;
+    }
+
+    std::mt19937_64 rng(config.rng_seed);
+    std::normal_distribution<float> normal(0.0f, 1.0f);
+    std::vector<float> x_t(total_latent);
+    for (int i = 0; i < total_latent; i++) {
+        x_t[i] = normal(rng);
+    }
+    if (config.truncation_factor > 0.0f && config.truncation_factor != 1.0f) {
+        for (int i = 0; i < total_latent; i++) {
+            x_t[i] *= config.truncation_factor;
+        }
+    }
+
+    printf("[sampler] Starting Euler sampling: %d steps, seq_len=%d (reusing speaker KV)\n",
+           config.num_steps, seq_len);
+
+    for (int step = 0; step < config.num_steps; step++) {
+        float t = t_schedule[step];
+        float t_next = t_schedule[step + 1];
+        float dt = t_next - t;
+
+        bool has_cfg = (t >= config.cfg_min_t && t <= config.cfg_max_t);
+
+        std::vector<float> v_pred;
+
+        if (has_cfg) {
+            std::vector<float> t_vec(batch_size, t);
+
+            std::vector<float> v_cond = model.forward(
+                x_t.data(), t_vec.data(), seq_len, batch_size,
+                text_mask, text_seq_len,
+                speaker_mask, speaker_seq_len,
+                kv_text, kv_speaker
+            );
+
+            std::vector<float> v_uncond_text = model.forward(
+                x_t.data(), t_vec.data(), seq_len, batch_size,
+                text_mask_uncond.data(), text_seq_len,
+                speaker_mask, speaker_seq_len,
+                kv_text, kv_speaker
+            );
+
+            std::vector<float> v_uncond_speaker = model.forward(
+                x_t.data(), t_vec.data(), seq_len, batch_size,
+                text_mask, text_seq_len,
+                speaker_mask_uncond.data(), speaker_seq_len,
+                kv_text, kv_speaker
+            );
+
+            v_pred.resize(total_latent);
+            for (int i = 0; i < total_latent; i++) {
+                v_pred[i] = v_cond[i]
+                    + config.cfg_scale_text    * (v_cond[i] - v_uncond_text[i])
+                    + config.cfg_scale_speaker * (v_cond[i] - v_uncond_speaker[i]);
+            }
+        } else {
+            std::vector<float> t_vec(batch_size, t);
+            v_pred = model.forward(
+                x_t.data(), t_vec.data(), seq_len, batch_size,
+                text_mask, text_seq_len,
+                speaker_mask, speaker_seq_len,
+                kv_text, kv_speaker
+            );
+        }
+
+        if (config.rescale_k > 0.0f && config.rescale_sigma > 0.0f) {
+            temporal_score_rescale(v_pred.data(), x_t.data(), t,
+                                  config.rescale_k, config.rescale_sigma, total_latent);
+        }
+
+        for (int i = 0; i < total_latent; i++) {
+            x_t[i] += v_pred[i] * dt;
+        }
+
+        if ((step + 1) % 10 == 0 || step == 0) {
+            printf("[sampler] Step %d/%d  t=%.3f\n", step + 1, config.num_steps, t);
+        }
+    }
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+    float elapsed = std::chrono::duration<float>(t_end - t_start).count();
+    printf("[sampler] Sampling complete in %.1f seconds\n", elapsed);
+
+    EchoSamplerResult result;
+    result.latent = std::move(x_t);
+    result.seq_len = seq_len;
+    result.batch_size = batch_size;
+    return result;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Blockwise Euler sampling
 // ────────────────────────────────────────────────────────────────────
 

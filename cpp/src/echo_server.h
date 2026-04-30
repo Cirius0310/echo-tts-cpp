@@ -29,6 +29,9 @@ struct EchoServerConfig {
 
     // Default sampling parameters (overridable per-request?)
     EchoSamplerConfig sampler_defaults;
+
+    // Max characters per text chunk for multi-chunk generation (0 = disable chunking)
+    int max_chunk_chars = 400;
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -66,5 +69,18 @@ private:
                                    const std::string & param, const std::string & code);
     static bool check_ffmpeg_available();
 
+    // Text chunking for long inputs
+    static std::vector<std::string> split_text_for_tts(const std::string & text, int max_chunk_chars);
+
+    // Multi-chunk generation: split text, generate per-chunk audio, concatenate.
+    // Returns concatenated float32 audio at 44100Hz.
+    std::vector<float> generate_chunked_audio(
+        const std::string & text,
+        const SpeakerLatentData & speaker,
+        const EchoSamplerConfig & sampler_config,
+        bool log_progress = true
+    );
+
     bool ffmpeg_available_ = false;
+    int max_chunk_chars_ = 400;
 };

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <memory>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -178,6 +179,193 @@ std::string EchoServer::json_error(const std::string & message, const std::strin
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Text splitting for TTS (sentence-aware chunking)
+// ────────────────────────────────────────────────────────────────────
+
+std::vector<std::string> EchoServer::split_text_for_tts(const std::string & text, int max_chunk_chars) {
+    if (max_chunk_chars <= 0 || text.empty()) {
+        return { text };
+    }
+
+    std::vector<std::string> raw_sentences;
+    std::string current;
+
+    for (size_t i = 0; i < text.size(); i++) {
+        char c = text[i];
+        current += c;
+
+        bool is_delim = (c == '.' || c == '!' || c == '?' || c == ';' || c == '\n');
+        bool is_quote_end = (i + 1 < text.size() && (c == '"' || c == '\'')) &&
+                            text[i + 1] == ' ';
+        bool is_ellipsis = (c == '.' && i + 2 < text.size() &&
+                            text[i + 1] == '.' && text[i + 2] == '.');
+
+        if (is_delim && !is_ellipsis) {
+            if (!current.empty()) {
+                raw_sentences.push_back(current);
+                current.clear();
+            }
+        } else if (is_quote_end) {
+            if (!current.empty()) {
+                raw_sentences.push_back(current);
+                current.clear();
+            }
+        } else if (is_ellipsis) {
+            current += "..";
+            i += 2;
+        }
+    }
+    if (!current.empty()) {
+        raw_sentences.push_back(current);
+    }
+
+    if (raw_sentences.empty()) {
+        return { text };
+    }
+
+    // Merge short sentences into larger chunks, respecting max_chunk_chars
+    std::vector<std::string> merged;
+    std::string buffer;
+
+    for (const auto & sentence : raw_sentences) {
+        std::string trimmed = sentence;
+        while (!trimmed.empty() && (trimmed[0] == ' ' || trimmed[0] == '\n')) {
+            trimmed.erase(0, 1);
+        }
+
+        if ((int)trimmed.size() >= max_chunk_chars) {
+            if (!buffer.empty()) {
+                merged.push_back(buffer);
+                buffer.clear();
+            }
+            // Long sentence: try splitting on commas
+            std::string sub_buffer;
+            for (size_t i = 0; i < trimmed.size(); i++) {
+                char c = trimmed[i];
+                sub_buffer += c;
+                bool break_point = (c == ',') || (c == ')') || (c == '—') || (c == '–');
+                if (break_point && (int)sub_buffer.size() >= max_chunk_chars / 4 && i + 1 < trimmed.size()) {
+                    merged.push_back(sub_buffer);
+                    sub_buffer.clear();
+                }
+            }
+            if (!sub_buffer.empty()) {
+                if (!buffer.empty() && (int)(buffer.size() + sub_buffer.size()) <= max_chunk_chars) {
+                    buffer += sub_buffer;
+                } else {
+                    if (!buffer.empty()) {
+                        merged.push_back(buffer);
+                        buffer.clear();
+                    }
+                    // Hard split if still too long
+                    if ((int)sub_buffer.size() > max_chunk_chars) {
+                        for (size_t pos = 0; pos < sub_buffer.size(); pos += max_chunk_chars) {
+                            size_t len = std::min((size_t)max_chunk_chars, sub_buffer.size() - pos);
+                            merged.push_back(sub_buffer.substr(pos, len));
+                        }
+                    } else {
+                        buffer = sub_buffer;
+                    }
+                }
+            }
+        } else {
+            if (!buffer.empty() && (int)(buffer.size() + trimmed.size()) > max_chunk_chars) {
+                merged.push_back(buffer);
+                buffer = trimmed;
+            } else {
+                if (!buffer.empty()) buffer += " ";
+                buffer += trimmed;
+            }
+        }
+    }
+    if (!buffer.empty()) {
+        merged.push_back(buffer);
+    }
+
+    if (merged.empty()) {
+        return { text };
+    }
+
+    return merged;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Multi-chunk audio generation
+// ────────────────────────────────────────────────────────────────────
+
+std::vector<float> EchoServer::generate_chunked_audio(
+    const std::string & text,
+    const SpeakerLatentData & speaker,
+    const EchoSamplerConfig & sampler_config,
+    bool log_progress
+) {
+    int max_chars = max_chunk_chars_;
+
+    // Disable chunking if max_chunk_chars is 0 or if text is short enough
+    if (max_chars <= 0 || (int)text.size() <= max_chars) {
+        return pipeline_.generate_from_latent(text, speaker, sampler_config);
+    }
+
+    std::vector<std::string> chunks = split_text_for_tts(text, max_chars);
+
+    if (chunks.size() <= 1) {
+        return pipeline_.generate_from_latent(text, speaker, sampler_config);
+    }
+
+    if (log_progress) {
+        printf("[server] Text split into %zu chunks:\n", chunks.size());
+        for (size_t i = 0; i < chunks.size(); i++) {
+            printf("[server]   [%zu/%zu] %zu chars: \"%s\"\n",
+                   i + 1, chunks.size(), chunks[i].size(), chunks[i].c_str());
+        }
+    }
+
+    // Pre-compute speaker KV cache (shared across all chunks)
+    EchoSamplerConfig chunk_config = sampler_config;
+    if (log_progress) {
+        printf("[server] Pre-computing speaker KV cache...\n");
+    }
+    EchoKVCache kv_speaker = pipeline_.compute_speaker_kv(speaker);
+
+    // Generate each chunk
+    std::vector<float> all_audio;
+    const float SILENCE_DURATION = 0.1f;  // 100ms silence between chunks
+    const int SILENCE_SAMPLES = (int)(SILENCE_DURATION * 44100);
+    std::vector<float> silence(SILENCE_SAMPLES, 0.0f);
+
+    for (size_t i = 0; i < chunks.size(); i++) {
+        if (log_progress) {
+            printf("[server] Generating chunk %zu/%zu (%zu chars)...\n",
+                   i + 1, chunks.size(), chunks[i].size());
+        }
+
+        std::vector<float> chunk_audio = pipeline_.generate_from_latent_with_speaker_kv(
+            chunks[i], speaker, chunk_config, kv_speaker
+        );
+
+        if (chunk_audio.empty()) {
+            fprintf(stderr, "[server] WARNING: Chunk %zu generated no audio\n", i + 1);
+            continue;
+        }
+
+        // Append chunk audio
+        all_audio.insert(all_audio.end(), chunk_audio.begin(), chunk_audio.end());
+
+        // Insert silence between chunks (not after last)
+        if (i + 1 < chunks.size()) {
+            all_audio.insert(all_audio.end(), silence.begin(), silence.end());
+        }
+    }
+
+    if (log_progress) {
+        printf("[server] Chunked generation complete: %zu chunks → %.1f sec total\n",
+               chunks.size(), all_audio.size() / 44100.0f);
+    }
+
+    return all_audio;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Voice pre-encoding
 // ────────────────────────────────────────────────────────────────────
 
@@ -203,6 +391,7 @@ bool EchoServer::pre_encode_voices(const std::unordered_map<std::string, std::st
 bool EchoServer::start(const EchoServerConfig & config) {
     sampler_defaults_ = config.sampler_defaults;
     model_name_ = "echo-tts";
+    max_chunk_chars_ = config.max_chunk_chars;
 
     // ── Load pipeline ──
     EchoPipelineConfig pipeline_config;
@@ -366,7 +555,7 @@ bool EchoServer::start(const EchoServerConfig & config) {
             std::lock_guard<std::mutex> lock(gpu_mutex_);
             auto t_start = std::chrono::high_resolution_clock::now();
 
-            audio = pipeline_.generate_from_latent(input_text, voice_it->second, sampler_defaults_);
+            audio = generate_chunked_audio(input_text, voice_it->second, sampler_defaults_, true);
 
             auto t_end = std::chrono::high_resolution_clock::now();
             float elapsed = std::chrono::duration<float>(t_end - t_start).count();
@@ -409,12 +598,163 @@ bool EchoServer::start(const EchoServerConfig & config) {
         res.set_header("Content-Disposition", "attachment; filename=\"speech." + response_format + "\"");
     });
 
+    // ── POST /v1/audio/speech/stream (SSE pseudo-streaming) ──
+    srv.Post("/v1/audio/speech/stream", [this](const httplib::Request & req, httplib::Response & res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Cache-Control", "no-cache");
+        res.set_header("Connection", "keep-alive");
+        res.set_header("X-Accel-Buffering", "no");
+
+        // Parse JSON body
+        json body;
+        try {
+            body = json::parse(req.body);
+        } catch (const json::parse_error &) {
+            res.status = 400;
+            res.set_content(json_error("Invalid JSON body", "invalid_request_error", "", ""), "application/json");
+            return;
+        }
+
+        if (!body.contains("input") || !body["input"].is_string() || body["input"].get<std::string>().empty()) {
+            res.status = 400;
+            res.set_content(json_error("input is required", "invalid_request_error", "input", ""), "application/json");
+            return;
+        }
+
+        if (!body.contains("voice") || !body["voice"].is_string()) {
+            res.status = 400;
+            res.set_content(json_error("voice is required", "invalid_request_error", "voice", ""), "application/json");
+            return;
+        }
+
+        std::string input_text = body["input"].get<std::string>();
+        std::string voice_name = body["voice"].get<std::string>();
+
+        auto voice_it = voice_cache_.find(voice_name);
+        if (voice_it == voice_cache_.end()) {
+            res.status = 400;
+            res.set_content(json_error("Invalid voice: '" + voice_name + "'", "invalid_request_error", "voice", "invalid_voice"), "application/json");
+            return;
+        }
+
+        std::string response_format = body.value("response_format", "wav");
+
+        // Split text into chunks
+        int max_chars = max_chunk_chars_;
+        if (max_chars <= 0) max_chars = 400;
+        std::vector<std::string> chunks = split_text_for_tts(input_text, max_chars);
+        if (chunks.empty()) chunks.push_back(input_text);
+
+        printf("[server/stream] Generating: voice='%s', %zu chunk(s), text='%s'\n",
+               voice_name.c_str(), chunks.size(), input_text.c_str());
+
+        // Use chunked content provider for SSE streaming
+        struct StreamState {
+            EchoServer * server;
+            SpeakerLatentData speaker_data;
+            EchoSamplerConfig config;
+            std::vector<std::string> chunks;
+            std::string format;
+            size_t current_idx = 0;
+            bool speaker_kv_computed = false;
+            bool done = false;
+            EchoKVCache kv_speaker;
+        };
+
+        auto state = std::make_shared<StreamState>();
+        state->server = this;
+        state->speaker_data = voice_it->second;
+        state->config = sampler_defaults_;
+        state->chunks = chunks;
+        state->format = response_format;
+
+        res.set_chunked_content_provider("text/event-stream",
+            [state](size_t /*offset*/, httplib::DataSink & sink) -> bool {
+                while (state->current_idx < state->chunks.size()) {
+                    // Serialize GPU access within the callback
+                    std::lock_guard<std::mutex> lock(state->server->gpu_mutex_);
+
+                    if (!state->speaker_kv_computed) {
+                        printf("[server/stream] Pre-computing speaker KV cache...\n");
+                        state->kv_speaker = state->server->pipeline_.compute_speaker_kv(state->speaker_data);
+                        state->speaker_kv_computed = true;
+                    }
+
+                    const auto & chunk_text = state->chunks[state->current_idx];
+                    printf("[server/stream] Generating chunk %zu/%zu (%zu chars)...\n",
+                           state->current_idx + 1, state->chunks.size(), chunk_text.size());
+
+                    std::vector<float> chunk_audio =
+                        state->server->pipeline_.generate_from_latent_with_speaker_kv(
+                            chunk_text, state->speaker_data, state->config, state->kv_speaker
+                        );
+
+                    // Encode chunk as WAV bytes then base64
+                    std::vector<uint8_t> audio_bytes;
+                    if (state->format == "pcm") {
+                        audio_bytes = audio_to_pcm_bytes(chunk_audio);
+                    } else {
+                        audio_bytes = audio_to_wav_bytes(chunk_audio, 44100);
+                    }
+
+                    // Manual base64 encoding
+                    static const char b64_table[] =
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                    std::string audio_b64;
+                    audio_b64.reserve((audio_bytes.size() + 2) / 3 * 4);
+                    size_t i = 0;
+                    while (i + 2 < audio_bytes.size()) {
+                        uint32_t triple = ((uint32_t)audio_bytes[i] << 16)
+                                        | ((uint32_t)audio_bytes[i + 1] << 8)
+                                        | (uint32_t)audio_bytes[i + 2];
+                        audio_b64 += b64_table[(triple >> 18) & 0x3F];
+                        audio_b64 += b64_table[(triple >> 12) & 0x3F];
+                        audio_b64 += b64_table[(triple >> 6) & 0x3F];
+                        audio_b64 += b64_table[triple & 0x3F];
+                        i += 3;
+                    }
+                    if (i < audio_bytes.size()) {
+                        uint32_t triple = (uint32_t)audio_bytes[i] << 16;
+                        if (i + 1 < audio_bytes.size()) triple |= (uint32_t)audio_bytes[i + 1] << 8;
+                        audio_b64 += b64_table[(triple >> 18) & 0x3F];
+                        audio_b64 += b64_table[(triple >> 12) & 0x3F];
+                        audio_b64 += (i + 1 < audio_bytes.size())
+                            ? b64_table[(triple >> 6) & 0x3F] : '=';
+                        audio_b64 += '=';
+                    }
+
+                    json event;
+                    event["chunk"] = state->current_idx + 1;
+                    event["total"] = state->chunks.size();
+                    event["text"]  = chunk_text;
+                    event["audio_b64"] = audio_b64;
+                    event["format"] = state->format;
+
+                    std::string sse_data = "data: " + event.dump() + "\n\n";
+                    state->current_idx++;
+
+                    bool ok = sink.write(sse_data.data(), sse_data.size());
+                    if (!ok) return false;
+                }
+
+                // All chunks done — send completion event
+                if (!state->done) {
+                    state->done = true;
+                    std::string done_event = "data: {\"done\":true}\n\n";
+                    sink.write(done_event.data(), done_event.size());
+                    sink.done();
+                }
+                return true;
+            });
+    });
+
     // ── Start listening ──
     printf("\n[server] Starting HTTP server on %s:%d\n", config.host.c_str(), config.port);
     printf("[server] Endpoints:\n");
-    printf("[server]   POST /v1/audio/speech  — OpenAI-compatible TTS\n");
-    printf("[server]   GET  /v1/audio/models   — List models\n");
-    printf("[server]   GET  /health            — Health check\n");
+    printf("[server]   POST /v1/audio/speech         — OpenAI-compatible TTS (with auto-chunking)\n");
+    printf("[server]   POST /v1/audio/speech/stream  — SSE pseudo-streaming\n");
+    printf("[server]   GET  /v1/audio/models          — List models\n");
+    printf("[server]   GET  /health                   — Health check\n");
     printf("[server] Available voices: ");
     bool first = true;
     for (const auto & kv : voice_cache_) {
