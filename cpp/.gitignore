@@ -1,0 +1,2 @@
+# Extra gitignore for cpp subdirectory
+build/

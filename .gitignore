@@ -1,0 +1,37 @@
+# ── Build artifacts ───────────────────────────────────────────
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+*.cmake
+!CMakeLists.txt
+
+# ── Compiled output ───────────────────────────────────────────
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# ── Model files (download separately) ─────────────────────────
+*.gguf
+onnx_models/
+*.onnx
+*.onnx.data
+
+# ── IDE / editor ──────────────────────────────────────────────
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store

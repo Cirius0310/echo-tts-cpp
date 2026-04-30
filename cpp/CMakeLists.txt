@@ -1,0 +1,116 @@
+cmake_minimum_required(VERSION 3.18)
+project(echo-tts LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# ── Options ──────────────────────────────────────────────────────────
+option(ECHO_CUDA   "Enable CUDA backend for GGML"          ON)
+option(ECHO_ONNX   "Enable ONNX Runtime for S1-DAC"        ON)
+
+# ── GGML (via FetchContent) ──────────────────────────────────────────
+include(FetchContent)
+
+set(GGML_CUDA ${ECHO_CUDA} CACHE BOOL "" FORCE)
+set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GGML_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    ggml
+    GIT_REPOSITORY https://github.com/ggml-org/ggml.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(ggml)
+
+# ── ONNX Runtime ─────────────────────────────────────────────────────
+if(ECHO_ONNX)
+    # User must set ONNXRUNTIME_ROOT to the extracted ONNX Runtime package
+    # e.g. cmake -DONNXRUNTIME_ROOT=C:/onnxruntime-win-x64-gpu-1.18.0 ..
+    if(NOT DEFINED ONNXRUNTIME_ROOT)
+        message(STATUS "ONNXRUNTIME_ROOT not set, looking in default paths...")
+        # Try common locations
+        find_path(ONNXRUNTIME_INCLUDE_DIR
+            NAMES onnxruntime_cxx_api.h
+            PATH_SUFFIXES include
+        )
+        find_library(ONNXRUNTIME_LIB
+            NAMES onnxruntime
+        )
+    else()
+        set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
+        find_library(ONNXRUNTIME_LIB
+            NAMES onnxruntime
+            PATHS "${ONNXRUNTIME_ROOT}/lib"
+            NO_DEFAULT_PATH
+        )
+    endif()
+
+    if(ONNXRUNTIME_LIB)
+        message(STATUS "ONNX Runtime found: ${ONNXRUNTIME_LIB}")
+        add_library(onnxruntime SHARED IMPORTED)
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${ONNXRUNTIME_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
+        )
+        if(WIN32)
+            # On Windows, also need the import lib
+            find_file(ONNXRUNTIME_DLL
+                NAMES onnxruntime.dll
+                PATHS "${ONNXRUNTIME_ROOT}/lib" "${ONNXRUNTIME_ROOT}/bin"
+                NO_DEFAULT_PATH
+            )
+            find_library(ONNXRUNTIME_IMPLIB
+                NAMES onnxruntime
+                PATHS "${ONNXRUNTIME_ROOT}/lib"
+                NO_DEFAULT_PATH
+            )
+            if(ONNXRUNTIME_IMPLIB)
+                set_target_properties(onnxruntime PROPERTIES
+                    IMPORTED_IMPLIB "${ONNXRUNTIME_IMPLIB}"
+                )
+            endif()
+        endif()
+    else()
+        message(WARNING "ONNX Runtime not found. Set ONNXRUNTIME_ROOT. S1-DAC support disabled.")
+        set(ECHO_ONNX OFF)
+    endif()
+endif()
+
+# ── Source files ─────────────────────────────────────────────────────
+set(ECHO_SOURCES
+    src/main.cpp
+    src/echo_model.cpp
+    src/echo_sampler.cpp
+    src/echo_pca.cpp
+    src/echo_tokenizer.cpp
+    src/echo_audio.cpp
+    src/echo_postprocess.cpp
+    src/echo_pipeline.cpp
+)
+
+if(ECHO_ONNX)
+    list(APPEND ECHO_SOURCES src/echo_dac_onnx.cpp)
+endif()
+
+add_executable(echo-tts ${ECHO_SOURCES})
+
+target_include_directories(echo-tts PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern
+)
+
+target_link_libraries(echo-tts PRIVATE ggml)
+
+if(ECHO_ONNX)
+    target_link_libraries(echo-tts PRIVATE onnxruntime)
+    target_compile_definitions(echo-tts PRIVATE ECHO_HAS_ONNX=1)
+endif()
+
+if(ECHO_CUDA)
+    target_compile_definitions(echo-tts PRIVATE ECHO_HAS_CUDA=1)
+endif()
+
+# ── Install ──────────────────────────────────────────────────────────
+install(TARGETS echo-tts RUNTIME DESTINATION bin)
