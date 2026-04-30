@@ -58,11 +58,11 @@ mkdir build && cd build
 
 # Windows (MSVC)
 cmake .. -G "Visual Studio 17 2022" -DONNXRUNTIME_ROOT=C:/path/to/onnxruntime-win-x64-gpu-1.19.0
-cmake --build . --config Release
+cmake --build . --config Release --parallel
 
 # Linux
 cmake .. -DONNXRUNTIME_ROOT=/path/to/onnxruntime-linux-x64-gpu-1.19.0
-cmake --build . --config Release
+cmake --build . --config Release --parallel
 ```
 
 ONNX Runtime is optional — if omitted, the DAC autoencoder is skipped (useful for diagnostic dumps only).
