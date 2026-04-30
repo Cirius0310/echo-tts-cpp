@@ -36,3 +36,8 @@ onnxruntime*/
 # ── OS ────────────────────────────────────────────────────────
 Thumbs.db
 .DS_Store
+
+# ── Voice reference audio (large, user-provided) ───────────────
+*.wav
+*.ogg
+!examples/*.wav
