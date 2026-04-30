@@ -10,6 +10,7 @@ A high-performance C++ inference engine for [Echo-TTS](https://github.com/jordan
 - CMake ≥3.18
 - MSVC 2022 (Windows) or GCC 11+ (Linux)
 - [ONNX Runtime](https://github.com/microsoft/onnxruntime) (GPU package, ≥1.19)
+- [cuDNN 9.x](https://developer.nvidia.com/cudnn) — required at runtime by ONNX Runtime CUDA provider
 
 GGML is fetched automatically by CMake via `FetchContent` — no manual setup needed.
 
