@@ -33,6 +33,10 @@ struct EchoServerConfig {
     // Max characters per text chunk for multi-chunk generation (0 = disable chunking)
     int max_chunk_chars = 400;
 
+    // Volume normalization
+    NormalizeMode normalize_mode = NormalizeMode::None;
+    float         normalize_target = 0.0f;
+
     // Log VRAM usage at key pipeline stages
     bool log_vram = false;
 };
@@ -87,4 +91,6 @@ private:
     bool ffmpeg_available_ = false;
     int max_chunk_chars_ = 400;
     bool log_vram_ = false;
+    NormalizeMode normalize_mode_ = NormalizeMode::None;
+    float normalize_target_ = 0.0f;
 };

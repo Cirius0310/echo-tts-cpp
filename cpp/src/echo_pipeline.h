@@ -26,6 +26,9 @@ struct EchoPipelineConfig {
     std::string model_path;           // GGUF file (required)
     std::string dac_encoder_path;     // ONNX (required for generation)
     std::string dac_decoder_path;     // ONNX (required for generation)
+
+    NormalizeMode normalize_mode = NormalizeMode::None;
+    float        normalize_target = 0.0f;  // default per-mode; >0 to override
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -115,4 +118,6 @@ private:
 #ifdef ECHO_HAS_ONNX
     EchoDACSession dac_;
 #endif
+    NormalizeMode normalize_mode_ = NormalizeMode::None;
+    float normalize_target_ = 0.0f;
 };

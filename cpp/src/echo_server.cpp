@@ -392,12 +392,16 @@ bool EchoServer::start(const EchoServerConfig & config) {
     sampler_defaults_ = config.sampler_defaults;
     model_name_ = "echo-tts";
     max_chunk_chars_ = config.max_chunk_chars;
+    normalize_mode_ = config.normalize_mode;
+    normalize_target_ = config.normalize_target;
 
     // ── Load pipeline ──
     EchoPipelineConfig pipeline_config;
     pipeline_config.model_path       = config.model_path;
     pipeline_config.dac_encoder_path = config.dac_encoder_path;
     pipeline_config.dac_decoder_path = config.dac_decoder_path;
+    pipeline_config.normalize_mode   = config.normalize_mode;
+    pipeline_config.normalize_target = config.normalize_target;
 
     if (!pipeline_.load(pipeline_config)) {
         fprintf(stderr, "[server] ERROR: Failed to load pipeline\n");

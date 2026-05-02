@@ -43,6 +43,9 @@ bool EchoPipeline::load(const EchoPipelineConfig & config) {
     }
 #endif
 
+    normalize_mode_ = config.normalize_mode;
+    normalize_target_ = config.normalize_target;
+
     printf("[pipeline] Ready.\n");
     return true;
 }
@@ -216,6 +219,10 @@ std::vector<float> EchoPipeline::generate(
             output_audio.resize(crop_len);
         }
 
+        if (!output_audio.empty()) {
+            normalize_audio_ex(normalize_mode_, output_audio.data(), (int)output_audio.size(), normalize_target_);
+        }
+
         printf("[pipeline] Output: %zu samples (%.1f sec)\n",
                output_audio.size(), output_audio.size() / 44100.0f);
     }
@@ -293,6 +300,10 @@ std::vector<float> EchoPipeline::generate_from_latent(
         );
         if (crop_len > 0 && crop_len < out_audio_len) {
             output_audio.resize(crop_len);
+        }
+
+        if (!output_audio.empty()) {
+            normalize_audio_ex(normalize_mode_, output_audio.data(), (int)output_audio.size(), normalize_target_);
         }
 
         printf("[pipeline] Output: %zu samples (%.1f sec)\n",
@@ -387,6 +398,10 @@ std::vector<float> EchoPipeline::generate_from_latent_with_speaker_kv(
             output_audio.resize(crop_len);
         }
 
+        if (!output_audio.empty()) {
+            normalize_audio_ex(normalize_mode_, output_audio.data(), (int)output_audio.size(), normalize_target_);
+        }
+
         printf("[pipeline] Output: %zu samples (%.1f sec)\n",
                output_audio.size(), output_audio.size() / 44100.0f);
     }
@@ -473,6 +488,10 @@ std::vector<float> EchoPipeline::generate_blockwise(
         );
         if (crop_len > 0 && crop_len < out_audio_len) {
             output_audio.resize(crop_len);
+        }
+
+        if (!output_audio.empty()) {
+            normalize_audio_ex(normalize_mode_, output_audio.data(), (int)output_audio.size(), normalize_target_);
         }
 
         printf("[pipeline] Output: %zu samples (%.1f sec)\n",

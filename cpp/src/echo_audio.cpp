@@ -49,6 +49,68 @@ void normalize_audio(float * audio, int num_samples) {
     }
 }
 
+// ── Volume normalization (output) ────────────────────────────────────
+
+void normalize_peak(float * audio, int num_samples, float target_peak) {
+    if (num_samples <= 0) return;
+
+    float max_abs = 0.0f;
+    for (int i = 0; i < num_samples; i++) {
+        max_abs = std::max(max_abs, std::abs(audio[i]));
+    }
+
+    if (max_abs < 1e-8f) return;  // silence, skip
+
+    float gain = target_peak / max_abs;
+    for (int i = 0; i < num_samples; i++) {
+        audio[i] *= gain;
+    }
+}
+
+void normalize_rms(float * audio, int num_samples, float target_rms) {
+    if (num_samples <= 0) return;
+
+    double sum_sq = 0.0;
+    for (int i = 0; i < num_samples; i++) {
+        sum_sq += (double)audio[i] * (double)audio[i];
+    }
+
+    float rms = (float)std::sqrt(sum_sq / num_samples);
+    if (rms < 1e-8f) return;  // silence, skip
+
+    float gain = target_rms / rms;
+
+    // Soft ceiling: if any sample would exceed ±1.0, clamp gain
+    float peak_after = 0.0f;
+    for (int i = 0; i < num_samples; i++) {
+        float v = audio[i] * gain;
+        if (v > peak_after)  peak_after = v;
+        if (-v > peak_after) peak_after = -v;
+    }
+
+    if (peak_after > 1.0f) {
+        gain /= peak_after;  // reduce gain so peak stays at 1.0
+    }
+
+    for (int i = 0; i < num_samples; i++) {
+        audio[i] *= gain;
+    }
+}
+
+void normalize_audio_ex(NormalizeMode mode, float * audio, int num_samples, float target) {
+    switch (mode) {
+        case NormalizeMode::Peak:
+            normalize_peak(audio, num_samples, target > 0.0f ? target : 0.89f);
+            break;
+        case NormalizeMode::RMS:
+            normalize_rms(audio, num_samples, target > 0.0f ? target : 0.12f);
+            break;
+        case NormalizeMode::None:
+        default:
+            break;
+    }
+}
+
 // ── Load WAV ────────────────────────────────────────────────────────
 
 std::vector<float> load_wav(

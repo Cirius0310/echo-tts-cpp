@@ -83,6 +83,33 @@ static bool parse_voice_pair(const char * arg, std::string & name, std::string &
     return true;
 }
 
+// Parse --normalize value: "off", "rms", "rms:0.15", "peak", "peak:0.95"
+static bool parse_normalize(const char * val, NormalizeMode & mode, float & target) {
+    if (!val || strcmp(val, "off") == 0) {
+        mode = NormalizeMode::None;
+        target = 0.0f;
+        return true;
+    }
+    if (strncmp(val, "rms", 3) == 0) {
+        mode = NormalizeMode::RMS;
+        target = 0.0f;
+        if (val[3] == ':') {
+            target = (float)atof(val + 4);
+        }
+        return true;
+    }
+    if (strncmp(val, "peak", 4) == 0) {
+        mode = NormalizeMode::Peak;
+        target = 0.0f;
+        if (val[4] == ':') {
+            target = (float)atof(val + 5);
+        }
+        return true;
+    }
+    fprintf(stderr, "ERROR: Unknown --normalize value '%s'. Use: off, rms[:target], peak[:target]\n", val);
+    return false;
+}
+
 static void print_usage(const char * prog) {
     printf("Echo-TTS C++ Inference Engine\n\n");
     printf("Usage:\n");
@@ -107,6 +134,7 @@ static void print_usage(const char * prog) {
     printf("  --rescale-sigma F    Temporal rescaling sigma (default: 0, disabled)\n");
     printf("  --blockwise N,N,...  Blockwise mode with block sizes\n");
     printf("  --continuation PATH  Continuation audio for blockwise\n");
+    printf("  --normalize MODE     Output normalization: off, rms[:target], peak[:target] (default: off)\n");
     printf("  --dump-intermediates DIR  Dump intermediate tensors for debugging\n");
     printf("  --log-vram               Log GPU VRAM usage at key pipeline stages\n");
     printf("\n");
@@ -179,6 +207,12 @@ static int cmd_serve(int argc, char ** argv) {
     server_config.sampler_defaults.sequence_length   = get_int(argc, argv, "--seq-length", 640);
     server_config.max_chunk_chars                     = get_int(argc, argv, "--max-chunk-chars", 400);
     server_config.log_vram                            = has_flag(argc, argv, "--log-vram");
+
+    // Parse --normalize
+    const char * normalize_val = get_arg(argc, argv, "--normalize", "off");
+    if (!parse_normalize(normalize_val, server_config.normalize_mode, server_config.normalize_target)) {
+        return 1;
+    }
 
     // Start server (blocks until shutdown)
     EchoServer server;
@@ -267,6 +301,11 @@ int main(int argc, char ** argv) {
     pipeline_config.model_path = model_path;
     pipeline_config.dac_encoder_path = dac_encoder_path;
     pipeline_config.dac_decoder_path = dac_decoder_path;
+
+    const char * normalize_val = get_arg(argc, argv, "--normalize", "off");
+    if (!parse_normalize(normalize_val, pipeline_config.normalize_mode, pipeline_config.normalize_target)) {
+        return 1;
+    }
 
     // Load pipeline
     EchoPipeline pipeline;

@@ -152,6 +152,7 @@ echo-tts \
 | `--truncation` | `0` | Noise truncation factor |
 | `--blockwise` | — | Comma-separated block sizes (e.g. `128,128,64`) |
 | `--continuation` | — | Continuation WAV for blockwise mode |
+| `--normalize` | `off` | Output volume normalization: `off`, `rms[:target]`, `peak[:target]` |
 | `--dump-intermediates` | — | Dump intermediate tensors for debugging |
 
 ## Server Mode
@@ -196,6 +197,7 @@ echo-tts serve \
 | `--seed` | `0` | RNG seed |
 | `--seq-length` | `640` | Sequence length |
 | `--max-chunk-chars` | `400` | Max chars per text chunk (0 = disable chunking) |
+| `--normalize` | `off` | Output volume normalization: `off`, `rms[:target]`, `peak[:target]` |
 | `--log-vram` | — | Log GPU VRAM usage at key pipeline stages |
 
 ### API Endpoints
